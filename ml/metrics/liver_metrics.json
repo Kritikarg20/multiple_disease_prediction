@@ -1,0 +1,19 @@
+{
+  "accuracy": 0.7179,
+  "precision": 0.7273,
+  "recall": 0.9639,
+  "f1": 0.829,
+  "roc_auc": 0.8235,
+  "model": "LogisticRegression",
+  "features": [
+    "age",
+    "bilirubin",
+    "alkphos",
+    "sgpt",
+    "sgot",
+    "albumin",
+    "alcohol_consumption"
+  ],
+  "test_size": 0.2,
+  "random_state": 42
+}
