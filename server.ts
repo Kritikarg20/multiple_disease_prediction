@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { Mistral } from "@mistralai/mistralai";
 
 dotenv.config();
 
@@ -14,8 +14,6 @@ app.use(express.json());
 
 // ── ML Service proxy ──────────────────────────────────────────────────────────
 
-// Carries a user-facing message + HTTP status so callers can report a clear reason
-// (bad input vs. model error vs. offline vs. timeout) instead of a generic failure.
 class MlError extends Error {
   constructor(public userMessage: string, public httpStatus: number) {
     super(userMessage);
@@ -27,7 +25,6 @@ async function mlPredict(
   disease: string,
   body: Record<string, unknown>
 ): Promise<{ prediction: boolean; probability: number; model: string }> {
-  // FIX 6: abort the request if the Python service takes longer than 10s
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
@@ -41,13 +38,11 @@ async function mlPredict(
     });
   } catch (e: any) {
     if (e?.name === "AbortError") throw new MlError("ML service took too long. Try again.", 504);
-    // network failure / connection refused — the service isn't reachable
     throw new MlError("Service is offline", 503);
   } finally {
     clearTimeout(timeoutId);
   }
 
-  // FIX 4: map the Python service's status to a clear, user-distinguishable reason
   if (!res.ok) {
     if (res.status === 422) throw new MlError("Invalid input values", 400);
     if (res.status === 500) throw new MlError("Model processing failed", 502);
@@ -56,8 +51,6 @@ async function mlPredict(
   return res.json() as Promise<{ prediction: boolean; probability: number; model: string }>;
 }
 
-// Reports an MlError with its mapped message/status. Kept named `mlUnavailable`
-// so the per-endpoint catch blocks below remain unchanged.
 function mlUnavailable(res: express.Response, error: any) {
   if (error instanceof MlError) {
     return res.status(error.httpStatus).json({ error: error.userMessage });
@@ -68,7 +61,6 @@ function mlUnavailable(res: express.Response, error: any) {
   });
 }
 
-// Route any MlError (offline / timeout / invalid input / model error) through mlUnavailable.
 function isConnRefused(e: any) {
   return e instanceof MlError ||
          e.message?.includes("fetch failed") ||
@@ -335,7 +327,7 @@ app.post("/api/lung_cancer", async (req, res) => {
   }
 });
 
-// ── 9. Symptom checker (rule-based — unchanged) ───────────────────────────────
+// ── 9. Symptom checker ───────────────────────────────────────────────────────
 app.post("/api/disease", (req, res) => {
   try {
     const { symptoms } = req.body;
@@ -385,37 +377,74 @@ app.post("/api/disease", (req, res) => {
   }
 });
 
-// ── 10. Chatbot ───────────────────────────────────────────────────────────────
-app.post("/api/chatbot", async (req, res) => {
-  const { message, context } = req.body;
-  if (!message) return res.status(400).json({ error: "Message parameter is required" });
-
-  if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === "MY_GEMINI_API_KEY" || !process.env.GEMINI_API_KEY.trim()) {
-    return res.json({ response: getFallbackChatbotReply(message, context) });
-  }
-
+// ── 10. Gemini test route (TEMPORARY — remove after debugging) ────────────────
+app.get("/api/test-gemini", async (req, res) => {
+  console.log("Key loaded:", process.env.GEMINI_API_KEY?.slice(0, 8));
   try {
     const aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await aiClient.models.generateContent({
       model: "gemini-2.0-flash",
-      contents: message,
-      config: {
-        systemInstruction: `You are a professional clinical intelligence assistant inside MediPredict AI.
-Current patient context: ${context || "No specific clinical prediction loaded yet"}.
-Guidelines:
-1. Provide factually sound, high-fidelity replies based on the patient context.
-2. Format responses clinically with markdown headers, bullet points, and tables.
-3. Keep tone clinical, precise, and scientific.
-4. Advise on diagnostic tests, specialist referrals, and lifestyle modifications.
-5. End with a clinical decision-support disclaimer note.`,
-      },
+      contents: [{ role: "user", parts: [{ text: "say hello" }] }],
     });
-    res.json({ response: response.text || "I was unable to analyze that." });
-  } catch (error: any) {
-    res.json({ response: getFallbackChatbotReply(message, context) });
+    const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
+    res.json({ ok: true, text });
+  } catch (e: any) {
+    res.json({ ok: false, error: e.message });
   }
 });
 
+// ── 11. Chatbot ───────────────────────────────────────────────────────────────
+app.post("/api/chatbot", async (req, res) => {
+  const { message, context } = req.body;
+
+  if (!message || typeof message !== "string") {
+    return res.status(400).json({ error: "message is required" });
+  }
+
+  if (!process.env.MISTRAL_API_KEY || !process.env.MISTRAL_API_KEY.trim()) {
+    return res.json({ response: getFallbackChatbotReply(message, context) });
+  }
+
+  try {
+    const client = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
+
+    const response = await client.chat.complete({
+      model: "mistral-small-latest",
+      messages: [
+        {
+          role: "system",
+          content: `You are MediPredict AI, a clinical decision-support assistant embedded in a disease prediction platform.
+
+Current prediction context: ${context || "No prediction has been run yet. You can still answer general medical questions."}
+
+You can assess and explain results for: Diabetes, Heart Disease, Liver Disease, Kidney Disease, Breast Cancer, Parkinson's Disease, Hepatitis, and Lung Cancer.
+
+Behavior rules:
+- Answer the user's question directly and clearly
+- If context is available, ground your answer in those specific results
+- If no context is set, answer general medical questions helpfully
+- Use markdown formatting: headers, bullet points, bold for key terms
+- Keep responses concise but clinically accurate
+- Always end every response with this exact disclaimer on a new line:
+  "_Disclaimer: This is clinical decision-support only, not a diagnosis. Always consult a licensed physician._"`,
+        },
+        {
+          role: "user",
+          content: message,
+        },
+      ],
+    });
+
+    const text =
+      response.choices?.[0]?.message?.content ??
+      "I was unable to generate a response. Please try again.";
+
+    res.json({ response: text });
+  } catch (error: any) {
+    console.error("Mistral API error:", error?.message, error?.status, error);
+    res.json({ response: getFallbackChatbotReply(message, context) });
+  }
+});
 // ── Health ────────────────────────────────────────────────────────────────────
 app.get("/api/health", (req, res) => {
   res.json({ status: "healthy", timestamp: new Date().toISOString() });

@@ -114,8 +114,4 @@ http://localhost:5173
 
 ---
 
-##  Author
 
-**Kritika R G**
-
----

@@ -11,7 +11,7 @@ export default function ChatbotWidget({ context }: ChatbotWidgetProps) {
     {
       id: "init-message",
       sender: "ai",
-      text: `Hello Dr. Jenkins. I have imported the active patient prediction evaluation context. How can I assist you with clinical interpretations, medical nutrition recommendation plans, or next diagnostic tests?`,
+      text: `Hello, I have imported the active patient prediction evaluation context. How can I assist you with clinical interpretations, medical nutrition recommendation plans, or next diagnostic tests?`,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
@@ -26,6 +26,13 @@ export default function ChatbotWidget({ context }: ChatbotWidgetProps) {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  // Converts **bold** and *italic* markdown to HTML inline
+  const renderInline = (text: string): string => {
+    return text
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.*?)\*/g, "<em>$1</em>");
+  };
 
   const handleSendMessage = async (textToSend: string) => {
     if (!textToSend.trim() || isLoading) return;
@@ -150,22 +157,66 @@ export default function ChatbotWidget({ context }: ChatbotWidgetProps) {
                     : "bg-[#006b4d] text-white"
                 }`}
               >
-                {/* Parse Markdown-like titles or details into bullet arrays to make fallback and gemini outputs incredibly clean */}
-                <div className="space-y-1.5 whitespace-pre-wrap font-sans">
+                <div className="space-y-1.5 font-sans">
                   {msg.text.split("\n").map((line, lIdx) => {
-                    if (line.startsWith("###")) {
-                      return <h5 key={lIdx} className="font-bold text-slate-900 border-b border-dashed border-emerald-100 pb-0.5 mt-2 mb-1 text-[11px] uppercase tracking-wide">{line.replace("###", "").trim()}</h5>;
+                    // ### Heading
+                    if (line.startsWith("### ") || line.startsWith("###")) {
+                      return (
+                        <h5 key={lIdx} className="font-bold text-slate-900 border-b border-dashed border-emerald-100 pb-0.5 mt-2 mb-1 text-[11px] uppercase tracking-wide">
+                          {line.replace(/^###\s*/, "").trim()}
+                        </h5>
+                      );
                     }
-                    if (line.startsWith("**") && line.endsWith("**")) {
-                      return <strong key={lIdx} className="block font-semibold mt-1">{line.replace(/\*\*/g, "").trim()}</strong>;
+                    // ## Heading
+                    if (line.startsWith("## ") || line.startsWith("##")) {
+                      return (
+                        <h5 key={lIdx} className="font-bold text-slate-900 pb-0.5 mt-2 mb-1 text-[11px] uppercase tracking-wide">
+                          {line.replace(/^##\s*/, "").trim()}
+                        </h5>
+                      );
                     }
-                    if (line.startsWith("- ")) {
-                      return <p key={lIdx} className="pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-emerald-500 font-normal">{line.replace("- ", "").trim()}</p>;
+                    // Bullet point - or *
+                    if (line.startsWith("- ") || line.startsWith("* ")) {
+                      const content = line.replace(/^[-*]\s/, "");
+                      return (
+                        <p
+                          key={lIdx}
+                          className="pl-3 relative before:content-['•'] before:absolute before:left-0 before:text-emerald-500 font-normal"
+                          dangerouslySetInnerHTML={{ __html: renderInline(content) }}
+                        />
+                      );
                     }
-                    if (line.match(/^\d+\./)) {
-                      return <p key={lIdx} className="pl-3 font-normal font-sans"><span className="font-semibold text-emerald-600 mr-1">{line.split(".")[0]}.</span>{line.split(".").slice(1).join(".")}</p>;
+                    // Numbered list
+                    if (line.match(/^\d+\.\s/)) {
+                      const num = line.match(/^(\d+)\./)?.[1];
+                      const content = line.replace(/^\d+\.\s/, "");
+                      return (
+                        <p key={lIdx} className="pl-3 font-normal">
+                          <span className="font-semibold text-emerald-600 mr-1">{num}.</span>
+                          <span dangerouslySetInnerHTML={{ __html: renderInline(content) }} />
+                        </p>
+                      );
                     }
-                    return <p key={lIdx} className="font-normal font-sans">{line}</p>;
+                    // Italic disclaimer line _text_
+                    if (line.startsWith("_") && line.endsWith("_")) {
+                      return (
+                        <p key={lIdx} className="italic text-slate-400 text-[10px] mt-1">
+                          {line.replace(/_/g, "")}
+                        </p>
+                      );
+                    }
+                    // Empty line → small spacer
+                    if (line.trim() === "") {
+                      return <div key={lIdx} className="h-1" />;
+                    }
+                    // Default paragraph — render inline bold/italic
+                    return (
+                      <p
+                        key={lIdx}
+                        className="font-normal"
+                        dangerouslySetInnerHTML={{ __html: renderInline(line) }}
+                      />
+                    );
                   })}
                 </div>
 

@@ -7,7 +7,7 @@ export default function TopBar() {
 
   const getBreadcrumbs = () => {
     const paths = location.pathname.split("/").filter(Boolean);
-    if (paths.length === 0) return <span className="text-[#6f7a73] font-medium text-xs">Dashboard</span>;
+    if (paths.length === 0) return <span className="text-[#6f7a73] font-medium text-xs">Home</span>;
     return (
       <div className="flex items-center gap-1.5 text-xs text-[#6f7a73] font-medium">
         <Link to="/" className="hover:text-[#005039] transition-colors">Home</Link>
@@ -64,7 +64,7 @@ export default function TopBar() {
 
       {/* Nav */}
       <nav className="flex items-center gap-1">
-        {navLink("/", "Dashboard")}
+        {navLink("/", "Home")}
         {navLink("/predict", "New Prediction")}
         {navLink("/history", "History Log")}
       </nav>
