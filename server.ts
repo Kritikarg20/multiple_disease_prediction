@@ -7,7 +7,7 @@ import { Mistral } from "@mistralai/mistralai";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
 
 app.use(express.json());
